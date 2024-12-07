@@ -52,20 +52,15 @@ fn create_logits_processor(ctx: &Context) -> LogitsProcessor {
 /// LLama main class.
 pub struct LLama {
     ctx: Context,
-
     tokenizer: Tokenizer,
     embedding: Embedding,
     eos_token_id: Option<u32>,
     index_pos: usize,
     generated: usize,
-
     blocks: Vec<Box<dyn Forwarder>>,
-
     ln_f: RmsNorm,
-    lm_head: Linear,
-
+    lm_head: Option<nn::Linear>, // Changed to Option<nn::Linear>
     logits_processor: LogitsProcessor,
-
     history: History,
     tokens: Vec<u32>,
 }
@@ -78,14 +73,9 @@ impl LLama {
         let num_blocks = self.blocks.len();
         let mut block_idx = 0;
 
-        // log::info!("X = {}", &x);
-
         while block_idx < num_blocks {
             let curr_block_id = self.blocks[block_idx].ident().to_owned();
             if curr_block_id == "local" {
-                // log::info!("x={:?} idx={idx} block={block_idx}", x.shape());
-
-                // do not batch local inferences
                 x = self.blocks[block_idx]
                     .forward_mut(&x, idx, block_idx, &mut self.ctx)
                     .await
@@ -95,7 +85,6 @@ impl LLama {
 
                 block_idx += 1;
             } else {
-                // collect all contiguous layers running on the same worker
                 let mut batch = vec![];
                 let first = block_idx;
                 while block_idx < num_blocks && self.blocks[block_idx].ident() == curr_block_id {
@@ -114,8 +103,6 @@ impl LLama {
                         anyhow!("error in forward batch operation for block {block_idx}: {e}")
                     })?;
             }
-
-            // log::info!("{}.forward(X) -> {}", &curr_block_id, &x);
         }
 
         let x = self
@@ -129,39 +116,38 @@ impl LLama {
             .contiguous()
             .map_err(|e| anyhow!("error in x.i.contiguous: {e}"))?;
 
-        let logits = self
-            .lm_head
-            .forward(&x)
-            .map_err(|e| anyhow!("error in lm_head.forward: {e}"))?;
+        let logits = if let Some(lm_head) = &self.lm_head {
+            lm_head
+                .forward(&x)
+                .map_err(|e| anyhow!("error in lm_head.forward: {e}"))?
+        } else {
+            x.clone() // Handle the case where lm_head is None
+        };
 
         logits
-            .to_dtype(DType::F32)
+            .to_dtype(Kind::Float)
             .map_err(|e| anyhow!("error converting logits: {e}"))
     }
 
     fn start_dialog_prompt(&mut self) -> Result<()> {
-        // make sure we start clean
         self.tokens.clear();
         self.ctx.cache.as_mut().expect("No cache specified").clear();
         self.index_pos = 0;
 
         log::debug!("generating history tokens ...");
 
-        // generate raw from history
         let dialog = self.history.encode_dialog_to_prompt();
 
         log::debug!("dialog={}", &dialog);
 
-        // tokenize raw
         self.tokens = self
             .tokenizer
-            .encode(dialog, false) // do not add special tokens as we already added them
+            .encode(dialog, false)
             .map_err(anyhow::Error::msg)?
             .get_ids()
             .to_vec();
 
         log::debug!("encoded={:?}", &self.tokens);
-
         log::debug!("history tokens: {}", self.tokens.len());
 
         Ok(())
@@ -173,7 +159,6 @@ impl Generator for LLama {
     type Shardable = Transformer;
     const MODEL_NAME: &'static str = "llama3";
 
-    /// Load this model from the context.
     async fn load(ctx: &mut Context) -> Result<Option<Box<Self>>> {
         let config = ctx.config.as_ref().expect("No config specified");
         let var_builder = ctx.var_builder.as_ref().expect("No var_builder specified");
@@ -186,11 +171,11 @@ impl Generator for LLama {
         )?;
 
         log::info!("loading lm_head ...");
-        let lm_head = linear(
-            config.hidden_size,
-            config.vocab_size,
-            var_builder.pp("lm_head"),
-        )?;
+        let lm_head = if let Some(lm_head) = var_builder.pp("lm_head").ok() {
+            Some(nn::linear(config.hidden_size, config.vocab_size, lm_head)?)
+        } else {
+            None
+        };
 
         log::info!("loading model.norm ...");
         let ln_f = candle_nn::rms_norm(
@@ -251,6 +236,7 @@ impl Generator for LLama {
         })))
     }
 }
+
 
 #[async_trait]
 impl TextGenerator for LLama {
