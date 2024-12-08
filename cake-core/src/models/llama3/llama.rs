@@ -203,7 +203,7 @@ impl Generator for LLama {
                 // Try alternative paths
                 let alternative_paths = vec![
                     "model.embed_tokens",
-                    "model.embed_tokens.weight"
+                    "model.embed_tokens.weight",
                     "embed_tokens",
                 ];
                 
