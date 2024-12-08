@@ -202,28 +202,24 @@ impl Generator for LLama {
                 
                 // Try alternative paths
                 let alternative_paths = vec![
+                    "model.embed_tokens",
                     "model.embed_tokens.weight"
+                    "embed_tokens",
                 ];
-    
-                let mut alternative_head = None;
-                for path in alternative_paths {
-                    match linear(
-                        config.hidden_size,
-                        config.vocab_size,
-                        var_builder.pp(path),
-                    ) {
-                        Ok(head) => {
-                            log::info!("Successfully loaded lm_head using alternative path: {}", path);
-                            alternative_head = Some(head);
-                            break;
-                        }
-                        Err(_) => continue,
-                    }
-                }
-    
-                alternative_head
+                
+                alternative_paths.into_iter()
+                    .find_map(|path| 
+                        linear(
+                            config.hidden_size,
+                            config.vocab_size,
+                            var_builder.pp(path),
+                        ).ok()
+                    )
             }
         };
+
+        // Use .expect() or handle the None case more explicitly
+        let lm_head = lm_head.expect("Could not load lm_head after trying alternatives");
         
         log::info!("loading model.norm ...");
         let ln_f = candle_nn::rms_norm(
