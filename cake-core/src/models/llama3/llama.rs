@@ -125,7 +125,7 @@ impl LLama {
         };
 
         logits
-            .to_dtype(Kind::Float)
+            .to_dtype(DType::F32)
             .map_err(|e| anyhow!("error converting logits: {e}"))
     }
 
