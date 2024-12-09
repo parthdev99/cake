@@ -7,6 +7,8 @@ edition = "2021"
 anyhow = "1.0.86"
 async-trait = "0.1.80"
 
+futures = "0.3"
+
 clap = { version = "4.5.8", features = ["derive"] }
 human_bytes = "0.4.3"
 lazy_static = "1.5.0"
