@@ -7,6 +7,9 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
+use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use futures::stream::StreamExt;
+use tokio::sync::mpsc;
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
@@ -51,6 +54,53 @@ impl ChatResponse {
     }
 }
 
+// pub async fn generate_text<TG, IG>(
+//     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
+//     req: HttpRequest,
+//     messages: web::Json<ChatRequest>,
+// ) -> impl Responder
+// where
+//     TG: TextGenerator + Send + Sync + 'static,
+//     IG: ImageGenerator + Send + Sync + 'static,
+// {
+//     let client = req.peer_addr().unwrap();
+
+//     log::info!("starting chat for {} ...", &client);
+
+//     let mut master = state.write().await;
+
+//     master.reset().unwrap();
+
+//     let llm_model = master.llm_model.as_mut().expect("LLM model not found");
+
+//     for message in messages.0.messages {
+//         llm_model.add_message(message).unwrap();
+//     }
+
+//     let mut resp = String::new();
+
+//     // just run one generation to stdout
+//     master
+//         .generate_text(|data| {
+//             resp += data;
+//             if data.is_empty() {
+//                 println!();
+//             } else {
+//                 print!("{data}")
+//             }
+//             std::io::stdout().flush().unwrap();
+//         })
+//         .await
+//         .unwrap();
+
+//     let response = ChatResponse::from_assistant_response(TG::MODEL_NAME.to_string(), resp);
+//     master.goodbye().await.unwrap();
+
+//     HttpResponse::Ok().json(response)
+// }
+
+
+
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
     req: HttpRequest,
@@ -61,37 +111,41 @@ where
     IG: ImageGenerator + Send + Sync + 'static,
 {
     let client = req.peer_addr().unwrap();
+    log::info!("starting streaming chat for {} ...", &client);
 
-    log::info!("starting chat for {} ...", &client);
+    // Create a channel for streaming
+    let (tx, rx) = mpsc::channel(100);
 
-    let mut master = state.write().await;
+    // Spawn a task to handle the generation
+    tokio::spawn(async move {
+        let mut master = state.write().await;
+        master.reset().unwrap();
+        let llm_model = master.llm_model.as_mut().expect("LLM model not found");
+        
+        // Add messages to the model
+        for message in messages.0.messages {
+            llm_model.add_message(message).unwrap();
+        }
 
-    master.reset().unwrap();
+        // Generate text with a streaming sender
+        master.generate_text(|data| {
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                tx_clone.send(data).await.unwrap();
+            });
+        }).await.unwrap();
 
-    let llm_model = master.llm_model.as_mut().expect("LLM model not found");
+        // Signal end of stream
+        drop(tx);
 
-    for message in messages.0.messages {
-        llm_model.add_message(message).unwrap();
-    }
+        // Cleanup
+        master.goodbye().await.unwrap();
+    });
 
-    let mut resp = String::new();
-
-    // just run one generation to stdout
-    master
-        .generate_text(|data| {
-            resp += data;
-            if data.is_empty() {
-                println!();
-            } else {
-                print!("{data}")
-            }
-            std::io::stdout().flush().unwrap();
-        })
-        .await
-        .unwrap();
-
-    let response = ChatResponse::from_assistant_response(TG::MODEL_NAME.to_string(), resp);
-    master.goodbye().await.unwrap();
-
-    HttpResponse::Ok().json(response)
+    // Create a streaming response
+    HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .streaming(
+            rx.map(|chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk)))
+        )
 }
