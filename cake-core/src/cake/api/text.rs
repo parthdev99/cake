@@ -8,7 +8,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 use futures::stream::{Stream, StreamExt};
 use tokio::sync::mpsc;
-use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -55,23 +54,6 @@ impl ChatResponse {
     }
 }
 
-// Wrapper to convert mpsc::Receiver into a Stream
-pin_project! {
-    struct ReceiverStream<T> {
-        #[pin]
-        receiver: mpsc::Receiver<T>,
-    }
-}
-
-impl<T> Stream for ReceiverStream<T> {
-    type Item = T;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
-        this.receiver.poll_recv(cx)
-    }
-}
-
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
     req: HttpRequest,
@@ -100,9 +82,10 @@ where
 
         // Generate text with a streaming sender
         master.generate_text(|data| {
+            let data_owned = data.to_string();
             let tx_clone = tx.clone();
             tokio::spawn(async move {
-                tx_clone.send(data.to_string()).await.unwrap();
+                tx_clone.send(data_owned).await.unwrap();
             });
         }).await.unwrap();
 
@@ -113,13 +96,10 @@ where
         master.goodbye().await.unwrap();
     });
 
-    // Wrap the receiver in a stream
-    let stream = ReceiverStream { receiver: rx };
-
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
         .streaming(
-            stream.map(|chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk)))
+            Box::pin(rx.map(|chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk))))
         )
 }
