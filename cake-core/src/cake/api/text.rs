@@ -6,10 +6,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::{StreamExt, Stream};
 use tokio::sync::mpsc;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
@@ -43,7 +41,6 @@ impl ChatResponse {
             index: 0,
             message: Message::assistant(message),
         }];
-
         Self {
             id,
             object,
@@ -67,27 +64,30 @@ where
     log::info!("starting streaming chat for {} ...", &client);
 
     // Create a channel for streaming
-    let (tx, rx) = mpsc::channel(100);
+    let (tx, mut rx) = mpsc::channel(100);
 
     // Spawn a task to handle the generation
     tokio::spawn(async move {
         let mut master = state.write().await;
         master.reset().unwrap();
         let llm_model = master.llm_model.as_mut().expect("LLM model not found");
-        
+
         // Add messages to the model
         for message in messages.0.messages {
             llm_model.add_message(message).unwrap();
         }
 
         // Generate text with a streaming sender
-        master.generate_text(|data| {
-            let data_owned = data.to_string();
-            let tx_clone = tx.clone();
-            tokio::spawn(async move {
-                tx_clone.send(data_owned).await.unwrap();
-            });
-        }).await.unwrap();
+        master
+            .generate_text(|data| {
+                let data_owned = data.to_string();
+                let tx_clone = tx.clone();
+                tokio::spawn(async move {
+                    tx_clone.send(data_owned).await.unwrap();
+                });
+            })
+            .await
+            .unwrap();
 
         // Signal end of stream
         drop(tx);
@@ -96,10 +96,12 @@ where
         master.goodbye().await.unwrap();
     });
 
+    // Convert the Receiver to a Stream using Stream::map_while
+    let stream = tokio_stream::wrappers::ReceiverStream::new(rx)
+        .map(|chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk)));
+
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
-        .streaming(
-            Box::pin(rx.map(|chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk))))
-        )
+        .streaming(Box::pin(stream))
 }
