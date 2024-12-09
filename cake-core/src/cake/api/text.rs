@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
-use futures::stream::{self, StreamExt}; // Import StreamExt for stream utilities
+use futures::stream; // Import stream for creating streams
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
