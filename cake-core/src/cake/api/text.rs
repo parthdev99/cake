@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
-use futures::stream::stream;
+use futures::stream::StreamExt;
 use tokio::sync::mpsc;
 
 #[derive(Deserialize)]
@@ -65,7 +65,7 @@ where
     log::info!("starting streaming chat for {} ...", &client);
 
     // Create a channel for streaming
-    let (tx, mut rx) = mpsc::channel(100);
+    let (tx, rx) = mpsc::channel(100);
 
     // Spawn a task to handle the generation
     tokio::spawn(async move {
@@ -97,10 +97,6 @@ where
     HttpResponse::Ok()
         .content_type("text/event-stream")
         .streaming(
-            stream! {
-                while let Some(chunk) = rx.recv().await {
-                    yield Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk))
-                }
-            }
+            rx.map(move |chunk| Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk)))
         )
 }
