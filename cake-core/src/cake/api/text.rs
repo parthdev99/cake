@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
-use futures::StreamExt; // Import StreamExt for stream utilities
+use futures::stream; // Import stream for creating streams
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
@@ -80,6 +80,10 @@ where
         master.generate_text(|data| {
             let data_owned = data.to_string();
             let tx_clone = tx.clone();
+
+            // Print the generated token
+            println!("Generated token: {}", data_owned);
+
             tokio::spawn(async move {
                 if tx_clone.send(data_owned).await.is_err() {
                     log::warn!("Receiver dropped");
@@ -97,7 +101,7 @@ where
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
-        .streaming(async_stream::stream! {
+        .streaming(stream! {
             while let Some(chunk) = rx.recv().await {
                 yield Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk));
             }
