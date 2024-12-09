@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
-use futures::stream; // Import stream for creating streams
+use futures::StreamExt; // Import StreamExt for stream utilities
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
@@ -97,7 +97,7 @@ where
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
-        .streaming(stream! {
+        .streaming(async_stream::stream! {
             while let Some(chunk) = rx.recv().await {
                 yield Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk));
             }
