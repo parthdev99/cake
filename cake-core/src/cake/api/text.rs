@@ -10,10 +10,18 @@ use async_stream::stream; // Import stream macro from async-stream crate
 use futures::stream::{Stream, StreamExt};
 use std::pin::Pin;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
 }
+
+#[derive(Deserialize, Clone)]
+pub struct Message {
+    pub role: String,
+    pub content: String,
+    // ... other fields
+}
+
 
 #[derive(Serialize)]
 struct Choice {
@@ -103,7 +111,7 @@ where
 
 // Custom stream creation function
 fn create_stream(
-    mut rx: tokio::sync::mpsc::Receiver<String>,
+    rx: tokio::sync::mpsc::Receiver<String>,
 ) -> Pin<Box<dyn Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>>> {
     Box::pin(futures::stream::unfold(rx, |mut rx| async move {
         match rx.recv().await {
