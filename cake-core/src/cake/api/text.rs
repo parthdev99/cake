@@ -4,7 +4,7 @@ use crate::models::{ImageGenerator, TextGenerator};
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH, Duration};
 use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
 use async_stream::stream; // Import stream macro from async-stream crate
 use futures::stream::{Stream, StreamExt};
@@ -53,25 +53,29 @@ impl ChatResponse {
 }
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
+    req: HttpRequest,
     messages: web::Json<ChatRequest>,
 ) -> impl Responder
 where
     TG: TextGenerator + Send + Sync + 'static,
     IG: ImageGenerator + Send + Sync + 'static,
 {
-    // Create a channel for streaming
-    let (tx, rx) = tokio::sync::mpsc::channel(100);
+    let client = req.peer_addr().unwrap();
+    log::info!("starting streaming chat for {} ...", &client);
+
+    // Create an unbounded channel for streaming
+    let (tx, mut rx): (UnboundedSender<String>, UnboundedReceiver<String>) = tokio::sync::mpsc::unbounded_channel();
 
     // Clone the state and messages for the async block
     let state_clone = state.clone();
     let messages_clone = messages.0.clone();
 
-    // Spawn a task to generate text
+    // Spawn a task to generate text and send dummy data every 30 seconds
     tokio::spawn(async move {
         let mut master = state_clone.write().await;
         master.reset().unwrap();
         let llm_model = master.llm_model.as_mut().expect("LLM model not found");
-
+        
         // Add messages to the model
         for message in messages_clone.messages {
             llm_model.add_message(message).unwrap();
@@ -80,38 +84,31 @@ where
         // Generate text with a streaming sender
         master.generate_text(|data| {
             let token = data.to_string();
-            let tx_clone = tx.clone();
-            println!("Generated token: {}", token);
-            tokio::spawn(async move {
-                if let Err(e) = tx_clone.send(token).await {
-                    log::error!("Failed to send token: {}", e);
-                }
-            });
+            if let Err(e) = tx.send(token) {
+                log::error!("Failed to send token: {}", e);
+            }
         }).await.unwrap();
 
-        // Signal end of stream
-        drop(tx);
+        // Send dummy data every 30 seconds
+        loop {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            if let Err(e) = tx.send("Dummy message every 30 seconds".to_string()) {
+                log::error!("Failed to send dummy message: {}", e);
+                break; // Exit loop if sending fails
+            }
+        }
     });
 
-    // Create a streaming response
+    // Create a stream from the unbounded receiver
+    let rx_stream = UnboundedReceiverStream::new(rx);
+    let event_stream = rx_stream.map(|token| {
+        Ok(actix_web::web::Bytes::from(format!("data: {}\n\n", token)))
+    });
+
+    // Return streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
         .append_header(("Cache-Control", "no-cache"))
         .append_header(("X-Accel-Buffering", "no"))
-        .streaming(create_stream(rx))
-}
-
-// Custom stream creation function
-fn create_stream(
-    rx: tokio::sync::mpsc::Receiver<String>,
-) -> Pin<Box<dyn Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>>> {
-    Box::pin(futures::stream::unfold(rx, |mut rx| async move {
-        match rx.recv().await {
-            Some(token) => {
-                let bytes = actix_web::web::Bytes::from(format!("data: {}\n\n", token));
-                Some((Ok(bytes), rx))
-            }
-            None => None,
-        }
-    }))
+        .streaming(Box::pin(event_stream))
 }
