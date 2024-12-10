@@ -55,18 +55,14 @@ impl ChatResponse {
 }
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
-    req: HttpRequest,
     messages: web::Json<ChatRequest>,
-) -> impl Responder
+) -> impl Responder 
 where
     TG: TextGenerator + Send + Sync + 'static,
     IG: ImageGenerator + Send + Sync + 'static,
 {
-    let client = req.peer_addr().unwrap();
-    log::info!("starting streaming chat for {} ...", &client);
-
     // Create an unbounded channel for streaming
-    let (tx, mut rx): (UnboundedSender<String>, UnboundedReceiver<String>) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx): (UnboundedSender<String>, UnboundedReceiver<String>) = tokio::sync::mpsc::unbounded_channel();
 
     // Clone the state and messages for the async block
     let state_clone = state.clone();
@@ -104,7 +100,7 @@ where
     // Create a stream from the unbounded receiver
     let rx_stream = UnboundedReceiverStream::new(rx);
     let event_stream = rx_stream.map(|token| {
-        Ok(actix_web::web::Bytes::from(format!("data: {}\n\n", token)))
+        Ok::<actix_web::web::Bytes, actix_web::Error>(actix_web::web::Bytes::from(format!("data: {}\n\n", token)))
     });
 
     // Return streaming response
