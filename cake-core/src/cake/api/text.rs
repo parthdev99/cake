@@ -15,14 +15,6 @@ pub struct ChatRequest {
     pub messages: Vec<Message>,
 }
 
-#[derive(Deserialize, Clone)]
-pub struct Message {
-    pub role: String,
-    pub content: String,
-    // ... other fields
-}
-
-
 #[derive(Serialize)]
 struct Choice {
     pub index: usize,
