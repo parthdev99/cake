@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
 use async_stream::stream; // Import stream macro from async-stream crate
+use futures::stream; // Import stream for creating streams
 
 #[derive(Deserialize)]
 pub struct ChatRequest {
@@ -49,7 +50,6 @@ impl ChatResponse {
         }
     }
 }
-
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
     req: HttpRequest,
