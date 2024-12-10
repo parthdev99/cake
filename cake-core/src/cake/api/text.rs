@@ -52,58 +52,36 @@ impl ChatResponse {
 }
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
-    req: HttpRequest,
     messages: web::Json<ChatRequest>,
 ) -> impl Responder
 where
     TG: TextGenerator + Send + Sync + 'static,
     IG: ImageGenerator + Send + Sync + 'static,
 {
-    let client = req.peer_addr().unwrap();
-    log::info!("starting streaming chat for {} ...", &client);
-
-    // Create a channel for streaming
-    let (tx, mut rx) = mpsc::channel(100);
-
-    // Spawn a task to handle the generation
-    tokio::spawn(async move {
-        let mut master = state.write().await;
-        master.reset().unwrap();
-        let llm_model = master.llm_model.as_mut().expect("LLM model not found");
-
-        // Add messages to the model
-        for message in messages.0.messages {
-            llm_model.add_message(message).unwrap();
-        }
-
-        // Generate text with a streaming sender
-        master.generate_text(|data| {
-            let data_owned = data.to_string();
-            let tx_clone = tx.clone();
-
-            // Print the generated token
-            println!("Generated token: {}", data_owned);
-
-            tokio::spawn(async move {
-                if tx_clone.send(data_owned).await.is_err() {
-                    log::warn!("Receiver dropped");
-                }
-            });
-        }).await.unwrap();
-
-        // Signal end of stream by dropping the sender
-        drop(tx);
-        
-        // Cleanup
-        master.goodbye().await.unwrap();
-    });
-
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
-        .streaming(stream! {
-            while let Some(chunk) = rx.recv().await {
-                yield Ok::<_, actix_web::Error>(actix_web::web::Bytes::from(chunk));
+        .header("Cache-Control", "no-cache")
+        .header("X-Accel-Buffering", "no")
+        .streaming(async_stream::stream! {
+            let state = state.clone();
+            let messages = messages.0.clone();
+
+            let mut master = state.write().await;
+            master.reset().unwrap();
+            let llm_model = master.llm_model.as_mut().expect("LLM model not found");
+
+            // Add messages to the model
+            for message in messages.messages {
+                llm_model.add_message(message).unwrap();
             }
+
+            // Generate text with streaming
+            master.generate_text(|data| {
+                let token = data.to_string();
+
+                println!("Generated token: {}", token);
+                yield Ok(actix_web::web::Bytes::from(format!("data: {}\n\n", token)));
+            }).await.unwrap();
         })
 }
