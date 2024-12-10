@@ -12,6 +12,10 @@ use std::pin::Pin;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+// Ensure all necessary traits are imported
+use std::fmt::Debug;
+use thiserror::Error;
+
 #[derive(Deserialize, Clone)]
 pub struct ChatRequest {
     pub messages: Vec<Message>,
@@ -53,6 +57,22 @@ impl ChatResponse {
         }
     }
 }
+
+// Custom error type for better error handling
+#[derive(Error, Debug)]
+enum StreamingError {
+    #[error("Failed to reset model")]
+    ModelResetError,
+    #[error("LLM model not found")]
+    ModelNotFoundError,
+    #[error("Failed to add message")]
+    MessageAddError,
+    #[error("Text generation failed")]
+    GenerationError,
+    #[error("Channel send failed")]
+    ChannelSendError,
+}
+
 pub async fn generate_text<TG, IG>(
     state: web::Data<Arc<RwLock<Master<TG, IG>>>>,
     messages: web::Json<ChatRequest>,
@@ -61,52 +81,80 @@ where
     TG: TextGenerator + Send + Sync + 'static,
     IG: ImageGenerator + Send + Sync + 'static,
 {
-    // Create an unbounded channel for streaming
-    let (tx, rx): (UnboundedSender<String>, UnboundedReceiver<String>) = tokio::sync::mpsc::unbounded_channel();
+    // Create a channel with a larger buffer
+    let (tx, rx) = tokio::sync::mpsc::channel(1000);
 
     // Clone the state and messages for the async block
     let state_clone = state.clone();
     let messages_clone = messages.0.clone();
 
-    // Spawn a task to generate text and send dummy data every 30 seconds
+    // Spawn a task to generate text
     tokio::spawn(async move {
-        let mut master = state_clone.write().await;
-        master.reset().unwrap();
-        let llm_model = master.llm_model.as_mut().expect("LLM model not found");
-        
-        // Add messages to the model
-        for message in messages_clone.messages {
-            llm_model.add_message(message).unwrap();
+        // Wrap the entire generation process in a result
+        let generation_result = async {
+            // Acquire write lock
+            let mut master = state_clone.write().await;
+
+            // Reset the model
+            master.reset().map_err(|_| StreamingError::ModelResetError)?;
+
+            // Ensure LLM model exists
+            let llm_model = master.llm_model.as_mut()
+                .ok_or(StreamingError::ModelNotFoundError)?;
+
+            // Add messages to the model
+            for message in messages_clone.messages {
+                llm_model.add_message(message)
+                    .map_err(|_| StreamingError::MessageAddError)?;
+            }
+
+            // Create a channel sender that can be moved into the closure
+            let tx_clone = tx.clone();
+
+            // Generate text with streaming
+            master.generate_text(move |data| {
+                let token = data.to_string();
+                
+                // Spawn a task for each token
+                let tx_for_token = tx_clone.clone();
+                tokio::spawn(async move {
+                    if let Err(_) = tx_for_token.send(token).await {
+                        // Log error silently to avoid panics
+                        log::error!("Failed to send token through channel");
+                    }
+                });
+            }).await.map_err(|_| StreamingError::GenerationError)?;
+
+            // Explicitly indicate success
+            Ok(())
+        }.await;
+
+        // Handle any errors that occurred during generation
+        if let Err(e) = generation_result {
+            log::error!("Text generation error: {:?}", e);
         }
 
-        // Generate text with a streaming sender
-        master.generate_text(|data| {
-            let token = data.to_string();
-            if let Err(e) = tx.send(token) {
-                log::error!("Failed to send token: {}", e);
-            }
-        }).await.unwrap();
-
-        // Send dummy data every 30 seconds
-        loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            if let Err(e) = tx.send("Dummy message every 30 seconds".to_string()) {
-                log::error!("Failed to send dummy message: {}", e);
-                break; // Exit loop if sending fails
-            }
-        }
+        // Always drop the sender to signal stream end
+        drop(tx);
     });
 
-    // Create a stream from the unbounded receiver
-    let rx_stream = UnboundedReceiverStream::new(rx);
-    let event_stream = rx_stream.map(|token| {
-        Ok::<actix_web::web::Bytes, actix_web::Error>(actix_web::web::Bytes::from(format!("data: {}\n\n", token)))
-    });
-
-    // Return streaming response
+    // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
         .append_header(("Cache-Control", "no-cache"))
         .append_header(("X-Accel-Buffering", "no"))
-        .streaming(Box::pin(event_stream))
+        .streaming(create_event_stream(rx))
+}
+
+// Create a stream of server-sent events
+fn create_event_stream(
+    mut rx: tokio::sync::mpsc::Receiver<String>
+) -> Pin<Box<dyn Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>>> {
+    Box::pin(async_stream::stream! {
+        while let Some(token) = rx.recv().await {
+            // Format as server-sent event
+            let event = format!("data: {}\n\n", token);
+            yield Ok(actix_web::web::Bytes::from(event));
+        }
+    })
 }
