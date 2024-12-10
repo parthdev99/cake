@@ -11,6 +11,7 @@ futures = "0.3"
 pin-project-lite = "0.2"
 async-stream = "0.3"
 tokio-stream = "0.1"  # Add this line for tokio_stream
+thiserror = "1.0"
 
 clap = { version = "4.5.8", features = ["derive"] }
 human_bytes = "0.4.3"
