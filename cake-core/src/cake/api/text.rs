@@ -91,7 +91,7 @@ where
     // Spawn a task to generate text
     tokio::spawn(async move {
         // Wrap the entire generation process in a result
-        let generation_result = async {
+        let generation_result: Result<(), StreamingError> = async {
             // Acquire write lock
             let mut master = state_clone.write().await;
 
