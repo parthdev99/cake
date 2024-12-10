@@ -5,10 +5,12 @@ use actix_web::{web, HttpRequest, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
-use tokio::sync::{RwLock, mpsc}; // Import mpsc for channels
+use tokio::sync::{RwLock}; // Import mpsc for channels
 use async_stream::stream; // Import stream macro from async-stream crate
 use futures::stream::{Stream, StreamExt};
 use std::pin::Pin;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Deserialize, Clone)]
 pub struct ChatRequest {
