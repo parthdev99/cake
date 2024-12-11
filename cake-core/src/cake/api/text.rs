@@ -83,61 +83,65 @@ where
 {
     // Create a channel with a larger buffer
     let (tx, rx) = tokio::sync::mpsc::channel(1000);
-
+    
     // Clone the state and messages for the async block
     let state_clone = state.clone();
     let messages_clone = messages.0.clone();
-
+    
     // Spawn a task to generate text
     tokio::spawn(async move {
         // Wrap the entire generation process in a result
-        let generation_result: Result<(), StreamingError> = async {
+        let generation_result = async {
             // Acquire write lock
             let mut master = state_clone.write().await;
-
+            
             // Reset the model
-            master.reset().map_err(|_| StreamingError::ModelResetError)?;
-
+            master.reset().map_err(|e| {
+                log::error!("Model reset error: {:?}", e);
+                StreamingError::ModelResetError
+            })?;
+            
             // Ensure LLM model exists
             let llm_model = master.llm_model.as_mut()
-                .ok_or(StreamingError::ModelNotFoundError)?;
-
+                .ok_or_else(|| {
+                    log::error!("LLM model not found");
+                    StreamingError::ModelNotFoundError
+                })?;
+            
             // Add messages to the model
             for message in messages_clone.messages {
                 llm_model.add_message(message)
-                    .map_err(|_| StreamingError::MessageAddError)?;
+                    .map_err(|e| {
+                        log::error!("Error adding message: {:?}", e);
+                        StreamingError::MessageAddError
+                    })?;
             }
-
-            // Create a channel sender that can be moved into the closure
-            let tx_clone = tx.clone();
-
+            
             // Generate text with streaming
-            master.generate_text(move |data| {
+            master.generate_text(|data| {
                 let token = data.to_string();
                 
-                // Spawn a task for each token
-                let tx_for_token = tx_clone.clone();
-                tokio::spawn(async move {
-                    if let Err(_) = tx_for_token.send(token).await {
-                        // Log error silently to avoid panics
-                        log::error!("Failed to send token through channel");
-                    }
-                });
-            }).await.map_err(|_| StreamingError::GenerationError)?;
-
-            // Explicitly indicate success
-            Ok(())
+                // Directly send token, without spawning a new task
+                if let Err(e) = tx.try_send(token) {
+                    log::error!("Failed to send token: {:?}", e);
+                }
+            }).await.map_err(|e| {
+                log::error!("Generation error: {:?}", e);
+                StreamingError::GenerationError
+            })?;
+            
+            Ok::<(), StreamingError>(())
         }.await;
-
+        
         // Handle any errors that occurred during generation
         if let Err(e) = generation_result {
-            log::error!("Text generation error: {:?}", e);
+            log::error!("Text generation failed: {:?}", e);
         }
-
+        
         // Always drop the sender to signal stream end
         drop(tx);
     });
-
+    
     // Create a streaming response
     HttpResponse::Ok()
         .content_type("text/event-stream")
