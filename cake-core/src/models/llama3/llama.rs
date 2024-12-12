@@ -373,7 +373,7 @@ impl TextGenerator for LLama {
         self.generated += 1;
         self.tokens.push(next_token);
 
-        Ok(Token {
+        Ok((Token {
             id: next_token,
             text: match self.tokenizer.decode(&[next_token], false) {
                 Ok(s) => Some(s),
@@ -383,7 +383,7 @@ impl TextGenerator for LLama {
                 }
             },
             is_end_of_stream: Some(next_token) == self.eos_token_id,
-        })
+        }, num_tokens)) // Return both the token and the number of tokens
     }
 
     /// Return the number of generated tokens so far.
