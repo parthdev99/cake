@@ -121,13 +121,8 @@ where
             // Generate text with streaming
             master.generate_text(|data| {
                 let token = data.to_string();
-                let timestamp = Utc::now(); // Get current timestamp
-
-                // Format token with timestamp and send it
-                let formatted_token = format!("{} - {}", timestamp.to_rfc3339(), token);
-                
                 // Directly send token, without spawning a new task
-                if let Err(e) = tx.try_send(formatted_token) {
+                if let Err(e) = tx.try_send(token) {
                     log::error!("Failed to send token: {:?}", e);
                 }
             }).await.map_err(|e| {
