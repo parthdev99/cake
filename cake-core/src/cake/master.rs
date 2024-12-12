@@ -107,52 +107,6 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
             "starting the inference loop (mem={})\n\n",
             human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
         );
-
-        log::debug!("  ctx.args.sample_len = {}", self.ctx.args.sample_len);
-
-        // stream(&self.ctx.args.prompt);
-
-        let mut start_gen = std::time::Instant::now();
-        let llm_model = self.llm_model.as_mut().expect("LLM model not found");
-
-        for index in 0..self.ctx.args.sample_len {
-            if index == 1 {
-                // record start time again since the first token is the warmup
-                start_gen = std::time::Instant::now()
-            }
-
-            let token = llm_model.next_token(index).await?;
-            if token.is_end_of_stream {
-                break;
-            } else {
-                stream(&token.to_string());
-            }
-        }
-
-        // signal end of stream
-        stream("");
-
-        let dt = start_gen.elapsed();
-        let generated = llm_model.generated_tokens();
-
-        log::info!(
-            "{} tokens generated ({} token/s) - mem={}",
-            generated,
-            (generated - 1) as f64 / dt.as_secs_f64(),
-            human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
-        );
-
-        Ok(())
-    }
-
-    pub async fn generate_text<S>(&mut self, mut stream: S) -> Result<()>
-    where
-        S: FnMut(&str),
-    {
-        log::info!(
-            "starting the inference loop (mem={})\n\n",
-            human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
-        );
     
         log::debug!("  ctx.args.sample_len = {}", self.ctx.args.sample_len);
     
