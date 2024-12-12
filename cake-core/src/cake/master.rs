@@ -7,6 +7,7 @@ use super::{api, Context};
 use crate::{ImageGenerationArgs, ModelType};
 use anyhow::Result;
 use image::{ImageBuffer, Rgb};
+use chrono::Utc;
 
 /// A master connects to, communicates with and orchestrates the workers.
 pub struct Master<TG, IG> {
@@ -120,9 +121,14 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
         if first_token.is_end_of_stream {
             return Ok(()); // Exit if end of stream is reached
         } else {
-            stream(&first_token.to_string());
+            let timestamp = Utc::now(); // Get current timestamp
+            stream(&format!("{} - {} - Prefill Duration: {:?} - Input Tokens: {}", 
+                timestamp.to_rfc3339(), 
+                first_token.to_string(), 
+                prefill_start.elapsed(), 
+                self.tokens.len())); // Include prefill duration and input token count
         }
-    
+
         // Record the time taken for prefill (first token generation)
         let prefill_duration = prefill_start.elapsed();
     
@@ -136,7 +142,8 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
             if token.is_end_of_stream {
                 break; // Exit loop if end of stream is reached
             } else {
-                stream(&token.to_string());
+                let timestamp = Utc::now(); // Get current timestamp for each subsequent token
+                stream(&format!("{} - {}", timestamp.to_rfc3339(), token.to_string())); // Stream each token with a timestamp
                 generated_count += 1; // Increment generated token count
             }
         }
@@ -155,7 +162,7 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
             generation_throughput,
             human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
         );
-    
+
         // Log prefill duration
         log::info!(
             "Prefill duration: {:?} ",
@@ -164,6 +171,7 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
     
         Ok(())
     }
+
 
     pub async fn generate_image<F>(&mut self, args: ImageGenerationArgs, callback: F) -> Result<()>
     where
