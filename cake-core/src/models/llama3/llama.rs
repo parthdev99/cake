@@ -313,7 +313,7 @@ impl TextGenerator for LLama {
     }
 
     /// Return the next token.
-    async fn next_token(&mut self, index: usize) -> Result<Token> {
+    async fn next_token(&mut self, index: usize) -> Result<(Token, usize)> {
         log::trace!("model.next_token({index})");
 
         // Prefill tokens with chat history the first time.
