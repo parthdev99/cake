@@ -11,6 +11,7 @@ use futures::stream::{Stream, StreamExt};
 use std::pin::Pin;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use chrono::Utc; // Import Utc from chron
 
 // Ensure all necessary traits are imported
 use std::fmt::Debug;
@@ -120,7 +121,7 @@ where
             // Generate text with streaming
             master.generate_text(|data| {
                 let token = data.to_string();
-                let timestamp = chrono::Utc::now(); // Get current timestamp
+                let timestamp = Utc::now(); // Get current timestamp
 
                 // Format token with timestamp and send it
                 let formatted_token = format!("{} - {}", timestamp.to_rfc3339(), token);
