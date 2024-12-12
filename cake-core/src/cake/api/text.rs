@@ -120,9 +120,13 @@ where
             // Generate text with streaming
             master.generate_text(|data| {
                 let token = data.to_string();
+                let timestamp = chrono::Utc::now(); // Get current timestamp
+
+                // Format token with timestamp and send it
+                let formatted_token = format!("{} - {}", timestamp.to_rfc3339(), token);
                 
                 // Directly send token, without spawning a new task
-                if let Err(e) = tx.try_send(token) {
+                if let Err(e) = tx.try_send(formatted_token) {
                     log::error!("Failed to send token: {:?}", e);
                 }
             }).await.map_err(|e| {
@@ -156,9 +160,10 @@ fn create_event_stream(
 ) -> Pin<Box<dyn Stream<Item = Result<actix_web::web::Bytes, actix_web::Error>>>> {
     Box::pin(async_stream::stream! {
         while let Some(token) = rx.recv().await {
-            // Format as server-sent event
+            // Format as server-sent event with proper handling for errors
             let event = format!("data: {}\n\n", token);
             yield Ok(actix_web::web::Bytes::from(event));
         }
     })
 }
+
