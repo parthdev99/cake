@@ -117,7 +117,8 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
         let prefill_start = std::time::Instant::now();
     
         // Generate the first token
-        let first_token = llm_model.next_token(0).await?;
+        let (first_token, token_count) = llm_model.next_token(0).await?;
+    
         if first_token.is_end_of_stream {
             return Ok(()); // Exit if end of stream is reached
         } else {
@@ -126,7 +127,7 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
                 timestamp.to_rfc3339(), 
                 first_token.to_string(), 
                 prefill_start.elapsed(), 
-                self.tokens.len())); // Include prefill duration and input token count
+                token_count)); // Include prefill duration and input token count
         }
 
         // Record the time taken for prefill (first token generation)
@@ -138,13 +139,14 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
         let mut generated_count = 1; // Start with 1 for the first generated token
     
         for index in 1..self.ctx.args.sample_len { // Start from 1 since 0 was already generated
-            let token = llm_model.next_token(index).await?;
+            let (token, _) = llm_model.next_token(index).await?; // Get only the token for subsequent calls
+            
             if token.is_end_of_stream {
                 break; // Exit loop if end of stream is reached
             } else {
                 let timestamp = Utc::now(); // Get current timestamp for each subsequent token
                 stream(&format!("{} - {}", timestamp.to_rfc3339(), token.to_string())); // Stream each token with a timestamp
-                generated_count += 1; // Increment generated token count
+                generated_count += 1;
             }
         }
     
