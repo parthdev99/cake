@@ -145,6 +145,72 @@ impl<TG: TextGenerator + Send + Sync + 'static, IG: ImageGenerator + Send + Sync
         Ok(())
     }
 
+    pub async fn generate_text<S>(&mut self, mut stream: S) -> Result<()>
+    where
+        S: FnMut(&str),
+    {
+        log::info!(
+            "starting the inference loop (mem={})\n\n",
+            human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
+        );
+    
+        log::debug!("  ctx.args.sample_len = {}", self.ctx.args.sample_len);
+    
+        let llm_model = self.llm_model.as_mut().expect("LLM model not found");
+    
+        // Start timing for prefill (time to first token)
+        let prefill_start = std::time::Instant::now();
+    
+        // Generate the first token
+        let first_token = llm_model.next_token(0).await?;
+        if first_token.is_end_of_stream {
+            return Ok(()); // Exit if end of stream is reached
+        } else {
+            stream(&first_token.to_string());
+        }
+    
+        // Record the time taken for prefill (first token generation)
+        let prefill_duration = prefill_start.elapsed();
+    
+        // Start timing for token generation
+        let mut start_gen = std::time::Instant::now();
+        
+        let mut generated_count = 1; // Start with 1 for the first generated token
+    
+        for index in 1..self.ctx.args.sample_len { // Start from 1 since 0 was already generated
+            let token = llm_model.next_token(index).await?;
+            if token.is_end_of_stream {
+                break; // Exit loop if end of stream is reached
+            } else {
+                stream(&token.to_string());
+                generated_count += 1; // Increment generated token count
+            }
+        }
+    
+        // Signal end of stream
+        stream("");
+    
+        let dt = start_gen.elapsed();
+        
+        // Calculate throughput for generated tokens
+        let generation_throughput = (generated_count - 1) as f64 / dt.as_secs_f64(); // tokens per second
+    
+        log::info!(
+            "{} tokens generated ({} token/s) - mem={}",
+            generated_count,
+            generation_throughput,
+            human_bytes::human_bytes(memory_stats::memory_stats().unwrap().physical_mem as f64)
+        );
+    
+        // Log prefill duration
+        log::info!(
+            "Prefill duration: {:?} ",
+            prefill_duration,
+        );
+    
+        Ok(())
+    }
+
     pub async fn generate_image<F>(&mut self, args: ImageGenerationArgs, callback: F) -> Result<()>
     where
         F: FnMut(Vec<ImageBuffer<Rgb<u8>, Vec<u8>>>) + Send + 'static,
