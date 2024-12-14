@@ -109,7 +109,6 @@ impl<G: Generator + 'static> Worker<G> {
                 ctx.var_builder = Some(
                     vb.clone()
                         .expect("Error retrieving var_builder")
-                        .pp(block_layer_name),
                 );
             }
         
