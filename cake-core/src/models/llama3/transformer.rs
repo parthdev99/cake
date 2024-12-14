@@ -35,12 +35,7 @@ impl Forwarder for Transformer {
 
         log::info!("Loading Model Layer: {}", name);
 
-        fn get_path(vb: &VarBuilderArgs) -> String {
-        // This is a hypothetical implementation - you'll need to adjust based on your actual VarBuilder
-            format!("Path: {}", "unknown")
-        }
-        
-        log::info!("Loading self attention path: {}", get_path(&vb));
+        log::info!("Loading self attention - VarBuilder details: {:?}", vb);
 
         let attn = super::CausalSelfAttention::load(vb.pp("self_attn"), cfg)?;
         let mlp = super::MLP::load(vb.pp("mlp"), cfg)?;
