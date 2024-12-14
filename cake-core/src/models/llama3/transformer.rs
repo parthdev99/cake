@@ -33,6 +33,9 @@ impl Forwarder for Transformer {
             .pp(&name);
         let cfg = ctx.config.as_ref().expect("No config specified");
 
+        log::info!("Loading Model Layer: {}", String);
+        log::info!("Loading self attention with path: {}", vb.pp("self_attn"));
+
         let attn = super::CausalSelfAttention::load(vb.pp("self_attn"), cfg)?;
         let mlp = super::MLP::load(vb.pp("mlp"), cfg)?;
         let rms_1 =
