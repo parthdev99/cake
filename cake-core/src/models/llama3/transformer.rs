@@ -35,8 +35,6 @@ impl Forwarder for Transformer {
 
         log::info!("Loading Model Layer: {}", name);
 
-        log::info!("Loading self attention - VarBuilder details: {:?}", vb);
-
         let attn = super::CausalSelfAttention::load(vb.pp("self_attn"), cfg)?;
         let mlp = super::MLP::load(vb.pp("mlp"), cfg)?;
         let rms_1 =
