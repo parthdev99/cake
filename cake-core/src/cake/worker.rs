@@ -103,17 +103,20 @@ impl<G: Generator + 'static> Worker<G> {
 
         for block_layer_name in &worker_topology.layers {
             log::info!("loading {} ...", &block_layer_name);
-
+        
             if ctx.args.model_type == ModelType::TextModel {
+                log::info!("Setting variable builder for {}", &block_layer_name);
                 ctx.var_builder = Some(
                     vb.clone()
                         .expect("Error retrieving var_builder")
                         .pp(block_layer_name),
                 );
             }
-
+        
+            log::info!("Loading block for {}", &block_layer_name);
             let block = G::Shardable::load(block_layer_name.to_string(), ctx)?;
-
+        
+            log::info!("Inserting block for {}", &block_layer_name);
             blocks.insert(block_layer_name.to_string(), block);
         }
 
