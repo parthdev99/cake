@@ -183,7 +183,28 @@ impl Generator for LLama {
             config.vocab_size,
             config.hidden_size,
             var_builder.pp("model.embed_tokens"),
-        )?;
+        ) {
+            Ok(head) => Some(head),
+            Err(e) => {
+                log::warn!("Could not load embeddings: {}. Attempting alternative approaches.", e);
+                
+                // Try alternative paths
+                let alternative_paths = vec![
+                    "model.embed_tokens",
+                    "model.embed_tokens.weight",
+                    "embed_tokens",
+                ];
+                
+                alternative_paths.into_iter()
+                    .find_map(|path| 
+                        linear(
+                            config.hidden_size,
+                            config.vocab_size,
+                            var_builder.pp(path),
+                        ).ok()
+                    )
+            }
+        };
 
         log::info!("loading lm_head ...");
         // let lm_head = linear(
@@ -226,7 +247,26 @@ impl Generator for LLama {
             config.hidden_size,
             config.rms_norm_eps,
             var_builder.pp("model.norm"),
-        )?;
+        ) {
+            Ok(head) => Some(head),
+            Err(e) => {
+                log::warn!("Could not load model.norm: {}. Attempting alternative approaches.", e);
+                
+                // Try alternative paths
+                let alternative_paths = vec![
+                    "norm"
+                ];
+                
+                alternative_paths.into_iter()
+                    .find_map(|path| 
+                        linear(
+                            config.hidden_size,
+                            config.vocab_size,
+                            var_builder.pp(path),
+                        ).ok()
+                    )
+            }
+        };
 
         log::info!("loading {} blocks ...", config.num_hidden_layers);
 
@@ -234,15 +274,32 @@ impl Generator for LLama {
 
         for i in 0..config.num_hidden_layers {
             let block_layer_name = format!("model.layers.{i}");
+            let fallback_layer_name = format!("layers.{i}");
+
             if let Some((node_name, node)) = ctx.topology.get_node_for_layer(&block_layer_name) {
                 log::debug!("node {node_name} will serve {}", &block_layer_name);
                 blocks.push(Box::new(
                     crate::cake::Client::new(ctx.device.clone(), &node.host, &block_layer_name)
                         .await?,
                 ));
+            } else if let Some((node_name, node)) = ctx.topology.get_node_for_layer(&fallback_layer_name) {
+                log::debug!("node {node_name} will serve {}", &fallback_layer_name);
+                blocks.push(Box::new(
+                    crate::cake::Client::new(ctx.device.clone(), &node.host, &fallback_layer_name)
+                        .await?,
+                ));
             } else {
-                log::debug!("{} will be served locally", &block_layer_name);
-                blocks.push(Transformer::load(block_layer_name.clone(), ctx)?);
+                // Try loading locally, first with primary path then fallback
+                match Transformer::load(block_layer_name.clone(), ctx) {
+                    Ok(transformer) => {
+                        log::debug!("{} will be served locally", &block_layer_name);
+                        blocks.push(transformer);
+                    }
+                    Err(_) => {
+                        log::debug!("{} will be served locally", &fallback_layer_name);
+                        blocks.push(Transformer::load(fallback_layer_name, ctx)?);
+                    }
+                }
             }
         }
 
