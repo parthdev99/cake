@@ -179,7 +179,7 @@ impl Generator for LLama {
         let var_builder = ctx.var_builder.as_ref().expect("No var_builder specified");
 
         log::info!("loading embeddings ...");
-        let embedding: Embedding = candle_nn::embedding(
+        let embedding: Embedding = match candle_nn::embedding(
             config.vocab_size,
             config.hidden_size,
             var_builder.pp("model.embed_tokens"),
@@ -243,7 +243,7 @@ impl Generator for LLama {
         let lm_head = lm_head.expect("Could not load lm_head after trying alternatives");
         
         log::info!("loading model.norm ...");
-        let ln_f = candle_nn::rms_norm(
+        let ln_f = match candle_nn::rms_norm(
             config.hidden_size,
             config.rms_norm_eps,
             var_builder.pp("model.norm"),
