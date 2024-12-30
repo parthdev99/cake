@@ -206,6 +206,36 @@ impl Generator for LLama {
             }
         };
 
+        let embedding = match candle_nn::embedding(
+            config.vocab_size,
+            config.hidden_size,
+            var_builder.pp("model.embed_tokens"),
+        ) {
+            Ok(emb) => emb,
+            Err(e) => {
+                log::warn!("Could not load model.embed_tokens: {}. Attempting alternative approaches.", e);
+                
+                // Try alternative paths
+                let alternative_paths = vec![
+                    "embed_tokens",
+                    "embedding",
+                    "model.embedding",
+                ];
+                
+                match alternative_paths.into_iter()
+                    .find_map(|path| 
+                        candle_nn::embedding(
+                            config.vocab_size,
+                            config.hidden_size,
+                            var_builder.pp(path),
+                        ).ok()
+                    ) {
+                        Some(emb) => emb,
+                        None => return Err(anyhow::format_err!("Failed to load embeddings from any known path")),
+                    }
+            }
+        };
+
         log::info!("loading lm_head ...");
         // let lm_head = linear(
         //     config.hidden_size,
@@ -241,30 +271,37 @@ impl Generator for LLama {
 
         // Use .expect() or handle the None case more explicitly
         let lm_head = lm_head.expect("Could not load lm_head after trying alternatives");
-        
-        log::info!("loading model.norm ...");
+
+        // For norm layer
+        log::info!("loading model norm layer...");
         let ln_f = match candle_nn::rms_norm(
             config.hidden_size,
             config.rms_norm_eps,
             var_builder.pp("model.norm"),
         ) {
-            Ok(head) => Some(head),
+            Ok(norm) => norm,
             Err(e) => {
                 log::warn!("Could not load model.norm: {}. Attempting alternative approaches.", e);
                 
                 // Try alternative paths
                 let alternative_paths = vec![
-                    "norm"
+                    "norm",
+                    "ln_f",
+                    "model.ln_f",
+                    "final_norm",
                 ];
                 
-                alternative_paths.into_iter()
+                match alternative_paths.into_iter()
                     .find_map(|path| 
                         candle_nn::rms_norm(
                             config.hidden_size,
                             config.rms_norm_eps,
                             var_builder.pp(path),
                         ).ok()
-                    )
+                    ) {
+                        Some(norm) => norm,
+                        None => return Err(anyhow::format_err!("Failed to load norm layer from any known path")),
+                    }
             }
         };
 
