@@ -179,33 +179,6 @@ impl Generator for LLama {
         let var_builder = ctx.var_builder.as_ref().expect("No var_builder specified");
 
         log::info!("loading embeddings ...");
-        let embedding: Embedding = match candle_nn::embedding(
-            config.vocab_size,
-            config.hidden_size,
-            var_builder.pp("model.embed_tokens"),
-        ) {
-            Ok(head) => Some(head),
-            Err(e) => {
-                log::warn!("Could not load embeddings: {}. Attempting alternative approaches.", e);
-                
-                // Try alternative paths
-                let alternative_paths = vec![
-                    "model.embed_tokens",
-                    "model.embed_tokens.weight",
-                    "embed_tokens",
-                ];
-                
-                alternative_paths.into_iter()
-                    .find_map(|path| 
-                        candle_nn::embedding(
-                            config.vocab_size,
-                            config.hidden_size,
-                            var_builder.pp(path),
-                        ).ok()
-                    )
-            }
-        };
-
         let embedding = match candle_nn::embedding(
             config.vocab_size,
             config.hidden_size,
