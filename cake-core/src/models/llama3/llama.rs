@@ -197,7 +197,7 @@ impl Generator for LLama {
                 
                 alternative_paths.into_iter()
                     .find_map(|path| 
-                        linear(
+                        candle_nn::embedding(
                             config.hidden_size,
                             config.vocab_size,
                             var_builder.pp(path),
@@ -259,7 +259,7 @@ impl Generator for LLama {
                 
                 alternative_paths.into_iter()
                     .find_map(|path| 
-                        linear(
+                        candle_nn::rms_norm(
                             config.hidden_size,
                             config.vocab_size,
                             var_builder.pp(path),
