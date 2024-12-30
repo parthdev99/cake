@@ -198,8 +198,8 @@ impl Generator for LLama {
                 alternative_paths.into_iter()
                     .find_map(|path| 
                         candle_nn::embedding(
-                            config.hidden_size,
                             config.vocab_size,
+                            config.hidden_size,
                             var_builder.pp(path),
                         ).ok()
                     )
@@ -261,7 +261,7 @@ impl Generator for LLama {
                     .find_map(|path| 
                         candle_nn::rms_norm(
                             config.hidden_size,
-                            config.vocab_size,
+                            config.rms_norm_eps,
                             var_builder.pp(path),
                         ).ok()
                     )
